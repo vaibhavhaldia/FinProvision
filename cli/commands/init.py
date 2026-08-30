@@ -12,7 +12,7 @@ from config import load_config
 init_app = typer.Typer(help="Initialise a new service — runs all generators.")
 
 
-@init_app.command()
+# @init_app.command()
 def init(
     config: str = typer.Option(..., "--config", help="Path to service.yaml"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print what would run, skip all API calls"),
