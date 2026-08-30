@@ -1,0 +1,27 @@
+service:
+  name: upi-payments-engine
+  domain: payments
+  owner: team-payments
+  env: staging
+
+pipeline:
+  type: streaming
+  source: upi_gateway
+  destination: s3_data_lake
+  schedule: "*/5 * * * *"
+  throughput: high
+
+infrastructure:
+  cloud: aws
+  region: ap-south-1
+  compute: lambda
+  database: rds_postgres
+
+compliance:
+  data_classification: restricted
+  sox_relevant: true
+  pci_dss: true
+  rbi_compliant: true
+  pii_fields:
+    - vpa_payer
+    - vpa_payee

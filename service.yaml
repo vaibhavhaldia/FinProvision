@@ -1,0 +1,32 @@
+service:
+  name: fx-rates-pipeline
+  domain: fx
+  owner: team-treasury
+  env: staging
+
+pipeline:
+  type: batch
+  source: bloomberg_api
+  destination: s3_data_lake
+  schedule: "0 6 * * 1-5"
+  throughput: standard
+
+infrastructure:
+  cloud: aws
+  region: eu-west-1
+  compute: lambda
+  database: rds_postgres
+
+compliance:
+  data_classification: confidential
+  sox_relevant: true
+  pci_dss: false
+  rbi_compliant: false
+  pii_fields: []
+
+atlassian:
+  jira_project_key: KAN
+  confluence_space: MFS
+  epic_name: "FX Rates Pipeline"
+
+
