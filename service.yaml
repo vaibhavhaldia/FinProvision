@@ -26,7 +26,7 @@ compliance:
 
 atlassian:
   jira_project_key: KAN
-  confluence_space: MFS
+  confluence_space: KAN
   epic_name: "FX Rates Pipeline"
 
 
