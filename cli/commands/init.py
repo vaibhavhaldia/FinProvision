@@ -6,7 +6,6 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from config import load_config
 
@@ -16,7 +15,7 @@ init_app = typer.Typer(help="Initialise a new service — runs all generators.")
 @init_app.command()
 def init(
     config: str = typer.Option(..., "--config", help="Path to service.yaml"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would run, skip all API calls and file writes"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would run, skip all API calls"),
     sarif: str = typer.Option(None, "--sarif", help="Write SARIF compliance report to this path"),
 ):
     console = Console()
@@ -31,9 +30,9 @@ def init(
         return
 
     steps = [
-        ("Compliance scan",      _run_compliance),
-        ("Terraform",            _run_terraform),
-        ("GitHub Actions",       _run_actions),
+        ("Compliance scan", _run_compliance),
+        ("Terraform", _run_terraform),
+        ("GitHub Actions", _run_actions),
         ("Databricks notebooks", _run_databricks),
         ("Atlassian (Jira + Confluence ADR)", _run_atlassian),
     ]
@@ -43,8 +42,7 @@ def init(
         console.rule(f"[bold]{label}[/bold]")
         try:
             fn(spec, console, sarif=sarif if label == "Compliance scan" else None)
-        except SystemExit as e:
-            # Compliance scanner calls sys.exit(1) on CRITICAL findings
+        except SystemExit:
             console.print(f"\n[red bold]✗ Init ABORTED — compliance gate failed[/red bold]")
             sys.exit(1)
         except Exception as e:
@@ -52,11 +50,10 @@ def init(
             failed = True
 
     if failed:
-        console.print("\n[yellow bold]⚠ Init completed with warnings — check output above[/yellow bold]")
+        console.print("\n[yellow bold]⚠ Init completed with warnings[/yellow bold]")
     else:
         console.print("\n[green bold]✓ Init complete — all generators ran successfully[/green bold]")
-        
-        
+
 
 def _run_compliance(spec, console: Console, sarif: str | None = None) -> None:
     from compliance.scanner import ComplianceScanner
@@ -65,7 +62,6 @@ def _run_compliance(spec, console: Console, sarif: str | None = None) -> None:
     target = Path(".").resolve()
     scanner = ComplianceScanner()
     findings = scanner.scan(target)
-
     reporter = Reporter(findings)
     reporter.print_text(console)
 
@@ -109,11 +105,11 @@ def _run_atlassian(spec, console: Console, **_) -> None:
 def _print_dry_run_plan(spec, console: Console) -> None:
     console.print("[dim]Would run the following generators:[/dim]\n")
     steps = [
-        ("Compliance scan",  "Scan project root for secrets, PII, banking violations"),
-        ("Terraform",        f"Generate VPC + S3 + IAM for {spec.service.name}"),
-        ("GitHub Actions",   f"Generate CI/CD pipeline → .github/workflows/{spec.service.name}.yml"),
-        ("Databricks",       f"Generate ingestion notebook(s) for domain: {spec.service.domain}"),
-        ("Atlassian",        f"Create Jira epic '{spec.atlassian.epic_name if spec.atlassian else 'N/A'}' + stories + Confluence ADR"),
+        ("Compliance scan", "Scan project root for secrets, PII, banking violations"),
+        ("Terraform", f"Generate VPC + S3 + IAM for {spec.service.name}"),
+        ("GitHub Actions", f"Generate CI/CD pipeline → .github/workflows/{spec.service.name}.yml"),
+        ("Databricks", f"Generate ingestion notebook(s) for domain: {spec.service.domain}"),
+        ("Atlassian", f"Create Jira epic '{spec.atlassian.epic_name if spec.atlassian else 'N/A'}' + stories + Confluence ADR"),
     ]
     for label, description in steps:
         console.print(f"  [cyan]•[/cyan] [bold]{label}[/bold] — {description}")

@@ -1,5 +1,6 @@
 import typer
-from cli.commands import scaffold
+from cli.commands.init import init_app
+
 
 app = typer.Typer(
     name="tradeforge",
@@ -7,8 +8,8 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
-
-app.add_typer(scaffold.app, name="scaffold")
+app.add_typer(init_app, name="init")
+# app.add_typer(scaffold.app, name="scaffold")
 
 if __name__ == "__main__":
     app()
