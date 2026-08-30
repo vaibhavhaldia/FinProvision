@@ -92,7 +92,8 @@ def _run_actions(spec, console: Console, **_) -> None:
 def _run_databricks(spec, console: Console, **_) -> None:
     from generators.databricks_gen import DatabricksGenerator
     gen = DatabricksGenerator(spec)
-    paths = gen.generate()
+    result = gen.generate()
+    paths = [result] if isinstance(result, str) else result
     for p in paths:
         console.print(f"[green]✓ Notebook: {p}[/green]")
 

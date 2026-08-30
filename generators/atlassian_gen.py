@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import time
 import base64
-import json
 from pathlib import Path
 
 import requests
@@ -54,8 +53,25 @@ class JiraClient:
         time.sleep(0.1)
         return resp.json()
 
-    def create_epic(self, project_key: str, epic_name: str, domain: str) -> str:
-        """Create epic, return issue key (e.g. 'FX-1')."""
+    def find_issue(self, project_key: str, summary: str, issue_type: str) -> str | None:
+        jql = f'project = "{project_key}" AND issuetype = "{issue_type}" AND summary ~ "\\"{summary}\\""'
+        url = f"{self.base_url}/rest/api/3/search/jql"   # ← updated endpoint
+        resp = requests.get(
+            url,
+            headers=self.headers,
+            params={"jql": jql, "maxResults": 1, "fields": "summary"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        issues = resp.json().get("issues", [])
+        return issues[0]["key"] if issues else None
+
+    def create_epic(self, project_key: str, epic_name: str, domain: str) -> tuple[str, bool]:
+        """Create epic if it doesn't exist. Returns (key, created)."""
+        existing = self.find_issue(project_key, epic_name, "Epic")
+        if existing:
+            return existing, False
+
         payload = {
             "fields": {
                 "project": {"key": project_key},
@@ -68,7 +84,7 @@ class JiraClient:
             }
         }
         result = self._post("issue", payload)
-        return result["key"]
+        return result["key"], True
 
     def create_story(
         self, project_key: str, epic_key: str, summary: str, description: str
@@ -79,11 +95,11 @@ class JiraClient:
                 "summary": summary,
                 "description": _adf(description),
                 "issuetype": {"name": "Story"},
-                "parent": {"key": epic_key},  # links story to epic
+                "parent": {"key": epic_key},
             }
         }
         result = self._post("issue", payload)
-        return result["key"]
+        return str(result["key"])
 
 
 class ConfluenceClient:
@@ -104,12 +120,12 @@ class ConfluenceClient:
         url = f"{self.base_url}/wiki/api/v2/{endpoint}"
         resp = requests.post(url, headers=self.headers, json=payload, timeout=10)
         if not resp.ok:
-            print(f"[DEBUG] Confluence {resp.status_code}: {resp.text[:300]}")
+            print(f"[DEBUG] Confluence {resp.status_code}: {resp.text}")
         resp.raise_for_status()
         return resp.json()
 
     def get_space_id(self, space_key: str) -> str:
-        """Resolve space key (e.g. 'FXTEAM') to numeric space ID."""
+        """Resolve space key to numeric space ID (returned as string for JSON compat)."""
         url = f"{self.base_url}/wiki/api/v2/spaces"
         resp = requests.get(
             url,
@@ -121,7 +137,7 @@ class ConfluenceClient:
         results = resp.json().get("results", [])
         if not results:
             raise ValueError(f"Confluence space '{space_key}' not found.")
-        return results[0]["id"]
+        return str(results[0]["id"])
 
     def create_page(self, space_id: str, title: str, body_html: str) -> str:
         """Create a page, return its URL."""
@@ -136,9 +152,7 @@ class ConfluenceClient:
         }
         result = self._post("pages", payload)
         page_id = result["id"]
-        return (
-            f"{self.base_url}/wiki/spaces/{result.get('spaceKey', '')}/pages/{page_id}"
-        )
+        return f"{self.base_url}/wiki/spaces/{result.get('spaceKey', '')}/pages/{page_id}"
 
 
 STANDARD_STORIES = [
@@ -202,16 +216,13 @@ def run_atlassian(spec) -> None:
         console.print("[yellow]No atlassian config in spec — skipping.[/yellow]")
         return
 
-    # Check required env vars before attempting API calls
     missing = [
         v
         for v in ("ATLASSIAN_BASE_URL", "ATLASSIAN_EMAIL", "ATLASSIAN_API_TOKEN")
         if not os.environ.get(v)
     ]
     if missing:
-        console.print(
-            f"[yellow]⚠ Missing env vars: {missing} — skipping Atlassian.[/yellow]"
-        )
+        console.print(f"[yellow]⚠ Missing env vars: {missing} — skipping Atlassian.[/yellow]")
         return
 
     try:
@@ -221,88 +232,36 @@ def run_atlassian(spec) -> None:
         console.print(
             f"[red]✗ Jira API error ({e.response.status_code}): {e.response.text[:200]}[/red]"
         )
-        console.print(
-            "[dim]Tip: verify Jira is enabled at admin.atlassian.com → Products[/dim]"
-        )
+        console.print("[dim]Tip: verify Jira is enabled at admin.atlassian.com → Products[/dim]")
     except requests.ConnectionError:
-        console.print(
-            "[red]✗ Cannot reach Atlassian — check ATLASSIAN_BASE_URL in .env[/red]"
-        )
+        console.print("[red]✗ Cannot reach Atlassian — check ATLASSIAN_BASE_URL in .env[/red]")
 
 
 def _run_jira(client: JiraClient, cfg, spec, console) -> None:
     """Inner function — called only when connectivity is confirmed."""
     console.print(f"[cyan]Creating Jira epic: {cfg.epic_name}[/cyan]")
-    epic_key = client.create_epic(
-        cfg.jira_project_key, cfg.epic_name, spec.service.domain
-    )
-    console.print(f"  [green]✓ Epic created: {epic_key}[/green]")
-
-    all_stories = STANDARD_STORIES + DOMAIN_STORIES.get(spec.service.domain, [])
-    for summary, description in all_stories:
-        story_key = client.create_story(
-            cfg.jira_project_key, epic_key, summary, description
-        )
-        console.print(f"  [green]✓ Story: {story_key} — {summary}[/green]")
-
-    console.print(
-        f"\n[bold green]Jira: {len(all_stories)} stories created under {epic_key}[/bold green]"
-    )
-    try:
-        confluence = ConfluenceClient()
-        adr_url = create_adr(spec, confluence, cfg.confluence_space, epic_key)
-        console.print(f"\n[green]✓ ADR published: {adr_url}[/green]")
-
-    except Exception as e:
-        console.print(f"[yellow]⚠ Confluence ADR skipped: {e}[/yellow]")
 
     epic_key, created = client.create_epic(
         cfg.jira_project_key, cfg.epic_name, spec.service.domain
     )
+
     if created:
         console.print(f"  [green]✓ Epic created: {epic_key}[/green]")
+        all_stories = STANDARD_STORIES + DOMAIN_STORIES.get(spec.service.domain, [])
+        for summary, description in all_stories:
+            story_key = client.create_story(cfg.jira_project_key, epic_key, summary, description)
+            console.print(f"  [green]✓ Story: {story_key} — {summary}[/green]")
+        console.print(f"\n[bold green]Jira: {len(all_stories)} stories created under {epic_key}[/bold green]")
     else:
-        console.print(
-            f"[yellow]↩ Epic already exists: {epic_key} — skipping story creation[/yellow]"
-        )
-    return  # don't create duplicate stories either
+        console.print(f"  [yellow]↩ Epic already exists: {epic_key} — skipping stories[/yellow]")
 
-
-def find_issue(self, project_key: str, summary: str, issue_type: str) -> str | None:
-    """Search for an existing issue by exact summary. Returns key or None."""
-    jql = f'project = "{project_key}" AND issuetype = "{issue_type}" AND summary ~ "\\"{summary}\\""'
-    url = f"{self.base_url}/rest/api/3/search"
-    resp = requests.get(
-        url,
-        headers=self.headers,
-        params={"jql": jql, "maxResults": 1, "fields": "summary"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    issues = resp.json().get("issues", [])
-    return issues[0]["key"] if issues else None
-
-
-def create_epic(
-    self, project_key: str, epic_name: str, domain: str
-) -> tuple[str, bool]:
-    """Create epic if it doesn't exist. Returns (key, created)."""
-    existing = self.find_issue(project_key, epic_name, "Epic")
-    if existing:
-        return existing, False  # already exists
-
-    payload = {
-        "fields": {
-            "project": {"key": project_key},
-            "summary": epic_name,
-            "description": _adf(
-                f"Auto-generated by TradeForge scaffold for domain: {domain}."
-            ),
-            "issuetype": {"name": "Epic"},
-        }
-    }
-    result = self._post("issue", payload)
-    return result["key"], True
+    # Confluence ADR — best effort, does not block on failure
+    try:
+        confluence = ConfluenceClient()
+        adr_url = create_adr(spec, confluence, cfg.confluence_space, epic_key)
+        console.print(f"\n[green]✓ ADR published: {adr_url}[/green]")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Confluence ADR skipped: {e}[/yellow]")
 
 
 def create_adr(
